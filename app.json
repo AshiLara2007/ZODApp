@@ -11,7 +11,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.zod.manpower"
@@ -22,7 +24,9 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.zod.manpower",
-      "permissions": ["INTERNET"]
+      "permissions": [
+        "INTERNET"
+      ]
     },
     "web": {
       "favicon": "https://raw.githubusercontent.com/AshiLara2007/ZOD-Photos/main/ZOD%20LOGO%20(1).png"
@@ -35,6 +39,11 @@
           "color": "#002F66"
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "3ad1f698-a71f-4b3e-8427-3c03e28392ad"
+      }
+    }
   }
 }
