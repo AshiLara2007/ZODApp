@@ -1,6 +1,7 @@
 {
   "name": "zod-manpower-api",
   "version": "1.0.0",
+<<<<<<< HEAD
   "description": "ZOD Manpower API",
   "main": "index.js",
   "scripts": {
@@ -8,11 +9,18 @@
     "start": "node index.js",
     "android": "expo run:android",
     "ios": "expo run:ios"
+=======
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+>>>>>>> b6c086cd0dcb2fe1f0b2f5909dafa60806e532b6
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+<<<<<<< HEAD
     "@react-navigation/native": "^7.2.2",
     "@react-navigation/stack": "^7.8.10",
     "expo": "^49.0.23",
@@ -27,5 +35,10 @@
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"
+=======
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+>>>>>>> b6c086cd0dcb2fe1f0b2f5909dafa60806e532b6
   }
 }

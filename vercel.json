@@ -3,5 +3,13 @@
     "api/*.js": {
       "maxDuration": 10
     }
+<<<<<<< HEAD
   }
 }
+=======
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" }
+  ]
+}
+>>>>>>> b6c086cd0dcb2fe1f0b2f5909dafa60806e532b6
