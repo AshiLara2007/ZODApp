@@ -39,3 +39,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+<<<<<<< HEAD
+=======
+
+.vercel
+.env*.local
+>>>>>>> 863dab07892e9a76b3625cc630b2255a0a760620

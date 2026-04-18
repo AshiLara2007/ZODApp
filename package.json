@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
   "name": "zodapp",
   "version": "1.0.0",
   "main": "index.js",
@@ -19,4 +20,48 @@
     "react-native": "0.81.5"
   },
   "private": true
+=======
+  "name": "zod-manpower-api",
+  "version": "1.0.0",
+<<<<<<< HEAD
+  "description": "ZOD Manpower API",
+  "main": "index.js",
+  "scripts": {
+    "build": "echo 'Build completed'",
+    "start": "node index.js",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
+=======
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+>>>>>>> b6c086cd0dcb2fe1f0b2f5909dafa60806e532b6
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+<<<<<<< HEAD
+    "@react-navigation/native": "^7.2.2",
+    "@react-navigation/stack": "^7.8.10",
+    "expo": "^49.0.23",
+    "expo-device": "~5.4.0",
+    "expo-notifications": "~0.20.1",
+    "expo-splash-screen": "~0.20.5",
+    "expo-status-bar": "~1.6.0",
+    "react": "18.2.0",
+    "react-native": "0.72.10",
+    "react-native-vector-icons": "^10.3.0",
+    "react-native-webview": "13.2.2"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0"
+=======
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+>>>>>>> b6c086cd0dcb2fe1f0b2f5909dafa60806e532b6
+  }
+>>>>>>> 863dab07892e9a76b3625cc630b2255a0a760620
 }
