@@ -1,33 +1,20 @@
 {
   "expo": {
-<<<<<<< HEAD
     "name": "ZOD MANPOWER",
-=======
-    "name": "ZOD Manpower",
->>>>>>> 863dab07892e9a76b3625cc630b2255a0a760620
     "slug": "zod-manpower",
-    "version": "1.0.0",
+    "version": "1.0.3",
+    "sdkVersion": "52.0.0",
     "orientation": "portrait",
     "icon": "https://raw.githubusercontent.com/AshiLara2007/ZOD-Photos/main/ZOD%20LOGO%20(1).png",
-<<<<<<< HEAD
     "userInterfaceStyle": "automatic",
     "splash": {
       "image": "https://raw.githubusercontent.com/AshiLara2007/ZOD-Photos/main/ZOD%20LOGO%20(1).png",
       "resizeMode": "contain",
       "backgroundColor": "#002F66"
     },
-    "assetBundlePatterns": ["**/*"],
-=======
-    "userInterfaceStyle": "light",
-    "splash": {
-      "image": "https://raw.githubusercontent.com/AshiLara2007/ZOD-Photos/main/ZOD%20LOGO%20(1).png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "assetBundlePatterns": [
       "**/*"
     ],
->>>>>>> 863dab07892e9a76b3625cc630b2255a0a760620
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.zod.manpower"
@@ -35,18 +22,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "https://raw.githubusercontent.com/AshiLara2007/ZOD-Photos/main/ZOD%20LOGO%20(1).png",
-<<<<<<< HEAD
         "backgroundColor": "#002F66"
-      },
-      "package": "com.zod.manpower"
-    },
-    "web": {
-      "favicon": "https://raw.githubusercontent.com/AshiLara2007/ZOD-Photos/main/ZOD%20LOGO%20(1).png"
-    }
-  }
-}
-=======
-        "backgroundColor": "#ffffff"
       },
       "package": "com.zod.manpower",
       "permissions": [
@@ -56,20 +32,10 @@
     "web": {
       "favicon": "https://raw.githubusercontent.com/AshiLara2007/ZOD-Photos/main/ZOD%20LOGO%20(1).png"
     },
-    "plugins": [
-      [
-        "expo-notifications",
-        {
-          "icon": "https://raw.githubusercontent.com/AshiLara2007/ZOD-Photos/main/ZOD%20LOGO%20(1).png",
-          "color": "#002F66"
-        }
-      ]
-    ],
     "extra": {
       "eas": {
-        "projectId": "3ad1f698-a71f-4b3e-8427-3c03e28392ad"
+        "projectId": "b9f79e14-974e-449c-ae26-4681faececbf"
       }
     }
   }
 }
->>>>>>> 863dab07892e9a76b3625cc630b2255a0a760620
