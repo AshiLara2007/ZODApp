@@ -3,16 +3,31 @@ import {
   View, Text, TouchableOpacity, FlatList, Image,
   StyleSheet, ScrollView, Switch, ActivityIndicator,
   Alert, Linking, RefreshControl, TextInput, Share,
-  Animated, Dimensions, Modal, SafeAreaView, Platform
+  Animated, Dimensions, Platform, Modal
 } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import * as MailComposer from 'expo-mail-composer';
+import * as MediaLibrary from 'expo-media-library';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 const API_URL = 'https://zodmanpower.info/api/talents';
 const LOGO_URL = 'https://raw.githubusercontent.com/AshiLara2007/ZOD-Photos/main/ZOD%20LOGO%20(1).png';
-const APP_VERSION = '1.0.5';
+const APP_VERSION = '1.0.8';
+const ADMIN_EMAIL = 'zodmanpower1978@gmail.com';
+const WHATSAPP_NUMBER = '97455355206';
+
+// Cache keys
+const CACHE_KEYS = {
+  CANDIDATES: '@zod_candidates_cache',
+  LAST_UPDATE: '@zod_last_update',
+  OFFLINE_MODE: '@zod_offline_mode',
+  SAVED_PROFILES: '@zod_saved_profiles'
+};
 
 // ------------------- TRANSLATIONS -------------------
 const translations = {
@@ -43,7 +58,7 @@ const translations = {
     gender: 'Gender',
     status: 'Status',
     view_cv: 'View CV',
-    hire: 'Hire',
+    hire: 'Hire Now',
     error: 'Failed to load',
     last_update: 'Updated',
     total_cvs: 'Total Candidates',
@@ -91,6 +106,25 @@ const translations = {
     language_selection: 'Language Selection',
     english: 'English',
     arabic: 'Arabic',
+    offline_mode: 'Offline Mode',
+    enable_offline: 'Enable Offline Mode',
+    download_cv: 'Download CV',
+    download_profile: 'Download Profile',
+    view_saved_profiles: 'Saved Profiles',
+    no_saved_profiles: 'No saved profiles',
+    permission_required: 'Storage Permission Required',
+    permission_message: 'This app needs storage permission to save CVs to your device.',
+    allow: 'Allow',
+    deny: 'Deny',
+    download_success: 'Download Successful',
+    download_failed: 'Download Failed',
+    report_sent: 'Download report sent to admin',
+    file_saved: 'CV saved to Gallery → ZOD MANPOWER folder',
+    offline_available: 'Offline data available',
+    online_required: 'Internet connection required for updates',
+    saved_profiles: 'Saved Profiles',
+    profile_saved: 'Profile saved offline',
+    share_cv: 'Share CV',
   },
   ar: {
     app_name: 'زود مان باور',
@@ -119,7 +153,7 @@ const translations = {
     gender: 'الجنس',
     status: 'الحالة',
     view_cv: 'عرض السيرة',
-    hire: 'وظف',
+    hire: 'وظف الآن',
     error: 'فشل التحميل',
     last_update: 'آخر تحديث',
     total_cvs: 'إجمالي المرشحين',
@@ -167,6 +201,25 @@ const translations = {
     language_selection: 'اختيار اللغة',
     english: 'الإنجليزية',
     arabic: 'العربية',
+    offline_mode: 'الوضع دون اتصال',
+    enable_offline: 'تفعيل الوضع دون اتصال',
+    download_cv: 'تحميل السيرة',
+    download_profile: 'تحميل الملف الشخصي',
+    view_saved_profiles: 'الملفات المحفوظة',
+    no_saved_profiles: 'لا توجد ملفات محفوظة',
+    permission_required: 'صلاحية التخزين مطلوبة',
+    permission_message: 'يحتاج هذا التطبيق إلى صلاحية التخزين لتحميل السير الذاتية',
+    allow: 'سماح',
+    deny: 'رفض',
+    download_success: 'تم التحميل بنجاح',
+    download_failed: 'فشل التحميل',
+    report_sent: 'تم إرسال تقرير التحميل إلى المسؤول',
+    file_saved: 'تم حفظ السيرة في المعرض → مجلد زود مان باور',
+    offline_available: 'البيانات غير المتصلة متاحة',
+    online_required: 'اتصال الإنترنت مطلوب للتحديثات',
+    saved_profiles: 'الملفات المحفوظة',
+    profile_saved: 'تم حفظ الملف الشخصي دون اتصال',
+    share_cv: 'مشاركة السيرة الذاتية',
   }
 };
 
@@ -183,30 +236,420 @@ const mapJobToCategory = (talent) => {
   return 'Recruitment';
 };
 
-const fetchTalents = async () => {
+// ==================== FIXED: FETCH TALENTS WITH CORRECT CV URL ====================
+const fetchTalents = async (useOffline = false) => {
   try {
     const response = await fetch(API_URL);
     if (!response.ok) throw new Error();
     const data = await response.json();
     let talents = Array.isArray(data) ? data : (data.data || []);
-    return talents.map(t => ({
-      id: t.id || t._id,
-      name: t.name || 'N/A',
-      category: mapJobToCategory(t),
-      subCategory: t.job || 'General',
-      nationality: (t.country || 'N/A').toUpperCase(),
-      gender: t.gender || 'N/A',
-      age: t.age ? `${t.age}y` : 'N/A',
-      salary: t.salary ? `${t.salary} QAR` : 'N/A',
-      experience: t.experience || 'N/A',
-      status: 'Ready',
-      imageUrl: t.pic || '',
-      cvUrl: t.cv || '',
-      workerType: t.workerType || 'Recruitment',
-    }));
+    
+    const mappedTalents = talents.map(t => {
+      // Fix CV URL - මේකයි වැදගත්
+      let cvUrl = '';
+      if (t.cv && t.cv !== '#' && t.cv !== 'N/A' && t.cv !== '') {
+        if (t.cv.startsWith('http')) {
+          cvUrl = t.cv;
+        } else {
+          // Full URL එක හදනවා cvs folder එකට
+          cvUrl = `https://ksyxmoqzcghszrhlpaxh.supabase.co/storage/v1/object/public/zod_manpower/cvs/${t.cv}`;
+        }
+      }
+      
+      // Fix Image URL
+      let imageUrl = '';
+      if (t.pic && t.pic !== '#' && t.pic !== 'N/A' && t.pic !== '') {
+        if (t.pic.startsWith('http')) {
+          imageUrl = t.pic;
+        } else {
+          imageUrl = `https://ksyxmoqzcghszrhlpaxh.supabase.co/storage/v1/object/public/zod_manpower/photos/${t.pic}`;
+        }
+      }
+      
+      return {
+        id: t.id || t._id,
+        name: t.name || 'N/A',
+        category: mapJobToCategory(t),
+        subCategory: t.job || 'General',
+        nationality: (t.country || 'N/A').toUpperCase(),
+        gender: t.gender || 'N/A',
+        age: t.age ? `${t.age}y` : 'N/A',
+        salary: t.salary ? `${t.salary} QAR` : 'N/A',
+        experience: t.experience || 'N/A',
+        status: 'Ready',
+        imageUrl: imageUrl,
+        cvUrl: cvUrl,
+        workerType: t.workerType || 'Recruitment',
+      };
+    });
+    
+    await AsyncStorage.setItem(CACHE_KEYS.CANDIDATES, JSON.stringify(mappedTalents));
+    await AsyncStorage.setItem(CACHE_KEYS.LAST_UPDATE, new Date().toISOString());
+    
+    return mappedTalents;
   } catch (error) {
+    if (useOffline) {
+      const cached = await AsyncStorage.getItem(CACHE_KEYS.CANDIDATES);
+      if (cached) return JSON.parse(cached);
+    }
     return [];
   }
+};
+
+// ==================== FIXED: OPEN CV IN BROWSER ====================
+const openCV = async (url) => {
+  console.log('Opening CV URL:', url);
+  
+  if (!url || url === 'N/A' || url === '#' || url === '') {
+    Alert.alert('Info', 'CV link not available for this candidate');
+    return;
+  }
+  
+  try {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      await WebBrowser.openBrowserAsync(url, {
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
+        controlsColor: '#002F66',
+        toolbarColor: '#002F66',
+      });
+    } else {
+      Alert.alert('Error', 'Invalid URL format');
+    }
+  } catch (error) {
+    console.error('Browser error:', error);
+    Alert.alert('Error', 'Could not open CV. Please try again.');
+  }
+};
+
+// Send download report to admin email
+const sendDownloadReport = async (candidate, t, type = 'CV') => {
+  try {
+    const isAvailable = await MailComposer.isAvailableAsync();
+    if (isAvailable) {
+      await MailComposer.composeAsync({
+        recipients: [ADMIN_EMAIL],
+        subject: `${type} Download Report - ${candidate.name}`,
+        body: `
+          ${type} Download Report
+          ------------------
+          Candidate Name: ${candidate.name}
+          Candidate Category: ${candidate.subCategory}
+          Candidate Nationality: ${candidate.nationality}
+          Download Time: ${new Date().toLocaleString()}
+          App Version: ${APP_VERSION}
+          
+          This is an automated report from ZOD Manpower App.
+        `
+      });
+    }
+  } catch (error) {
+    console.log('Email send error:', error);
+  }
+};
+
+// Save profile to AsyncStorage for offline viewing
+const saveProfileToStorage = async (candidate, profileData) => {
+  try {
+    const savedProfiles = await AsyncStorage.getItem(CACHE_KEYS.SAVED_PROFILES);
+    let profiles = savedProfiles ? JSON.parse(savedProfiles) : [];
+    
+    const existingIndex = profiles.findIndex(p => p.id === candidate.id);
+    const profileEntry = {
+      id: candidate.id,
+      name: candidate.name,
+      category: candidate.subCategory,
+      nationality: candidate.nationality,
+      gender: candidate.gender,
+      age: candidate.age,
+      salary: candidate.salary,
+      experience: candidate.experience,
+      status: candidate.status,
+      imageUrl: candidate.imageUrl,
+      profileData: profileData,
+      savedAt: new Date().toISOString()
+    };
+    
+    if (existingIndex >= 0) {
+      profiles[existingIndex] = profileEntry;
+    } else {
+      profiles.push(profileEntry);
+    }
+    
+    await AsyncStorage.setItem(CACHE_KEYS.SAVED_PROFILES, JSON.stringify(profiles));
+    return true;
+  } catch (error) {
+    console.log('Save profile error:', error);
+    return false;
+  }
+};
+
+// ==================== DOWNLOAD CV TO GALLERY FOLDER ====================
+const downloadCV = async (candidate, t) => {
+  if (!candidate.cvUrl || candidate.cvUrl === 'N/A' || candidate.cvUrl === '#') {
+    Alert.alert('Info', 'CV link not available for this candidate');
+    return;
+  }
+
+  Alert.alert(
+    'Download CV',
+    `Save CV for ${candidate.name} to Gallery?`,
+    [
+      { text: 'Cancel', style: 'cancel' },
+      { 
+        text: 'Save', 
+        onPress: async () => {
+          try {
+            const { status } = await MediaLibrary.requestPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permission Required', 'Please allow access to save CVs to your gallery');
+              return;
+            }
+
+            const fileName = `${candidate.name.replace(/[^a-zA-Z0-9]/g, '_')}_CV.pdf`;
+            const fileUri = FileSystem.cacheDirectory + fileName;
+
+            Alert.alert('Downloading', 'Please wait...');
+            
+            const downloadResult = await FileSystem.downloadAsync(
+              candidate.cvUrl,
+              fileUri
+            );
+
+            if (downloadResult.status === 200 && downloadResult.uri) {
+              const asset = await MediaLibrary.createAssetAsync(downloadResult.uri);
+              
+              let album = await MediaLibrary.getAlbumAsync('ZOD MANPOWER');
+              if (album === null) {
+                album = await MediaLibrary.createAlbumAsync('ZOD MANPOWER', asset, false);
+              } else {
+                await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+              }
+              
+              await sendDownloadReport(candidate, t, 'CV');
+              
+              Alert.alert(
+                '✅ Download Successful', 
+                `CV saved to Gallery → ZOD MANPOWER folder\n\nFile: ${fileName}`,
+                [{ text: 'OK' }]
+              );
+            } else {
+              Alert.alert('Download Failed', 'Could not download the CV');
+            }
+          } catch (error) {
+            console.error('Download error:', error);
+            Alert.alert('Download Failed', error.message || 'Unknown error occurred');
+          }
+        }
+      }
+    ]
+  );
+};
+
+// Download Profile and save to offline storage
+const downloadProfile = async (candidate, t, onProfileSaved) => {
+  const profileData = `
+ZOD MANPOWER - Candidate Profile
+================================
+
+Name: ${candidate.name}
+Category: ${candidate.subCategory}
+Nationality: ${candidate.nationality}
+Gender: ${candidate.gender}
+Age: ${candidate.age}
+Salary: ${candidate.salary}
+Experience: ${candidate.experience}
+Status: ${candidate.status}
+
+CV Link: ${candidate.cvUrl || 'Not available'}
+
+Download Date: ${new Date().toLocaleString()}
+App Version: ${APP_VERSION}
+
+For more details, contact: ${ADMIN_EMAIL}
+  `;
+
+  Alert.alert(
+    'Download Profile',
+    `Save profile for ${candidate.name} offline? You can view it without internet.`,
+    [
+      { text: 'Cancel', style: 'cancel' },
+      { 
+        text: 'Save Offline', 
+        onPress: async () => {
+          try {
+            await saveProfileToStorage(candidate, profileData);
+            
+            const filePath = FileSystem.documentDirectory + `${candidate.name.replace(/[^a-zA-Z0-9]/g, '_')}_Profile.txt`;
+            await FileSystem.writeAsStringAsync(filePath, profileData);
+            
+            await sendDownloadReport(candidate, t, 'Profile');
+            Alert.alert('✅ Download Successful', 'Profile saved offline! You can view it from Saved Profiles.');
+            if (onProfileSaved) onProfileSaved();
+          } catch (error) {
+            Alert.alert('Download Failed', error.message);
+          }
+        }
+      }
+    ]
+  );
+};
+
+// View saved profiles offline
+const SavedProfilesModal = ({ visible, onClose, isDarkMode, t }) => {
+  const [savedProfiles, setSavedProfiles] = useState([]);
+  const [selectedProfile, setSelectedProfile] = useState(null);
+
+  useEffect(() => {
+    if (visible) {
+      loadSavedProfiles();
+    }
+  }, [visible]);
+
+  const loadSavedProfiles = async () => {
+    try {
+      const saved = await AsyncStorage.getItem(CACHE_KEYS.SAVED_PROFILES);
+      if (saved) {
+        setSavedProfiles(JSON.parse(saved));
+      }
+    } catch (error) {
+      console.log('Load profiles error:', error);
+    }
+  };
+
+  const deleteProfile = async (profileId) => {
+    Alert.alert(
+      'Delete Profile',
+      'Remove this saved profile?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const updated = savedProfiles.filter(p => p.id !== profileId);
+            await AsyncStorage.setItem(CACHE_KEYS.SAVED_PROFILES, JSON.stringify(updated));
+            setSavedProfiles(updated);
+            Alert.alert('Deleted', 'Profile removed from saved list');
+          }
+        }
+      ]
+    );
+  };
+
+  const ProfileViewer = ({ profile, onBack }) => (
+    <ScrollView style={styles.profileViewer}>
+      <TouchableOpacity onPress={onBack} style={styles.profileViewerBack}>
+        <Text style={styles.profileViewerBackText}>← Back to list</Text>
+      </TouchableOpacity>
+      <View style={styles.profileViewerHeader}>
+        {profile.imageUrl ? (
+          <Image source={{ uri: profile.imageUrl }} style={styles.profileViewerImage} />
+        ) : (
+          <View style={styles.profileViewerImagePlaceholder}>
+            <Text style={styles.profileViewerImagePlaceholderText}>👤</Text>
+          </View>
+        )}
+        <Text style={[styles.profileViewerName, isDarkMode && styles.darkTitle]}>{profile.name}</Text>
+        <Text style={[styles.profileViewerCategory, isDarkMode && styles.darkText]}>{profile.category}</Text>
+      </View>
+      <View style={styles.profileViewerContent}>
+        <View style={styles.profileViewerRow}><Text style={styles.profileViewerLabel}>📍 Nationality:</Text><Text style={[styles.profileViewerValue, isDarkMode && styles.darkText]}>{profile.nationality}</Text></View>
+        <View style={styles.profileViewerRow}><Text style={styles.profileViewerLabel}>👤 Gender:</Text><Text style={[styles.profileViewerValue, isDarkMode && styles.darkText]}>{profile.gender}</Text></View>
+        <View style={styles.profileViewerRow}><Text style={styles.profileViewerLabel}>🎂 Age:</Text><Text style={[styles.profileViewerValue, isDarkMode && styles.darkText]}>{profile.age}</Text></View>
+        <View style={styles.profileViewerRow}><Text style={styles.profileViewerLabel}>💰 Salary:</Text><Text style={[styles.profileViewerValue, isDarkMode && styles.darkText]}>{profile.salary}</Text></View>
+        <View style={styles.profileViewerRow}><Text style={styles.profileViewerLabel}>💼 Experience:</Text><Text style={[styles.profileViewerValue, isDarkMode && styles.darkText]}>{profile.experience}</Text></View>
+        <View style={styles.profileViewerRow}><Text style={styles.profileViewerLabel}>✅ Status:</Text><Text style={[styles.profileViewerValue, styles.statusBadge]}>{profile.status}</Text></View>
+        <View style={styles.profileViewerDivider} />
+        <Text style={[styles.profileViewerSavedDate, isDarkMode && styles.darkText]}>Saved: {new Date(profile.savedAt).toLocaleString()}</Text>
+      </View>
+    </ScrollView>
+  );
+
+  if (selectedProfile) {
+    return (
+      <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+        <View style={[styles.modalContainer, isDarkMode && styles.darkContainer]}>
+          <ProfileViewer profile={selectedProfile} onBack={() => setSelectedProfile(null)} />
+        </View>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <View style={[styles.modalContainer, isDarkMode && styles.darkContainer]}>
+        <LinearGradient colors={['#002F66', '#004A99']} style={styles.modalHeader}>
+          <Text style={styles.modalHeaderTitle}>{t.saved_profiles}</Text>
+          <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
+            <Text style={styles.modalCloseText}>✕</Text>
+          </TouchableOpacity>
+        </LinearGradient>
+        
+        {savedProfiles.length === 0 ? (
+          <View style={styles.emptySavedContainer}>
+            <Text style={styles.emptySavedIcon}>📭</Text>
+            <Text style={[styles.emptySavedText, isDarkMode && styles.darkText]}>{t.no_saved_profiles}</Text>
+            <Text style={[styles.emptySavedSubText, isDarkMode && styles.darkText]}>Download profiles to view them offline</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={savedProfiles}
+            keyExtractor={item => item.id}
+            renderItem={({ item }) => (
+              <TouchableOpacity style={[styles.savedProfileItem, isDarkMode && styles.darkCard]} onPress={() => setSelectedProfile(item)}>
+                {item.imageUrl ? (
+                  <Image source={{ uri: item.imageUrl }} style={styles.savedProfileImage} />
+                ) : (
+                  <View style={styles.savedProfileImagePlaceholder}>
+                    <Text style={styles.savedProfileImagePlaceholderText}>👤</Text>
+                  </View>
+                )}
+                <View style={styles.savedProfileInfo}>
+                  <Text style={[styles.savedProfileName, isDarkMode && styles.darkTitle]}>{item.name}</Text>
+                  <Text style={[styles.savedProfileCategory, isDarkMode && styles.darkText]}>{item.category}</Text>
+                  <Text style={[styles.savedProfileDate, isDarkMode && styles.darkText]}>{new Date(item.savedAt).toLocaleDateString()}</Text>
+                </View>
+                <TouchableOpacity style={styles.savedProfileDelete} onPress={() => deleteProfile(item.id)}>
+                  <Text style={styles.savedProfileDeleteText}>🗑️</Text>
+                </TouchableOpacity>
+              </TouchableOpacity>
+            )}
+            contentContainerStyle={styles.savedProfilesList}
+          />
+        )}
+      </View>
+    </Modal>
+  );
+};
+
+// ==================== HIRE FUNCTION WITH CV LINK ====================
+const handleHire = (candidate, t) => {
+  let message = `Hi! I'm interested in hiring ${candidate.name}`;
+  
+  if (candidate.subCategory && candidate.subCategory !== 'General') {
+    message += ` (${candidate.subCategory})`;
+  }
+  
+  if (candidate.nationality && candidate.nationality !== 'N/A') {
+    message += ` from ${candidate.nationality}`;
+  }
+  
+  message += `\n\n📋 Candidate Details:`;
+  message += `\n• Name: ${candidate.name}`;
+  message += `\n• Category: ${candidate.subCategory}`;
+  message += `\n• Nationality: ${candidate.nationality}`;
+  message += `\n• Gender: ${candidate.gender}`;
+  message += `\n• Age: ${candidate.age}`;
+  message += `\n• Salary: ${candidate.salary}`;
+  message += `\n• Experience: ${candidate.experience}`;
+  
+  if (candidate.cvUrl && candidate.cvUrl !== '#' && candidate.cvUrl !== 'N/A') {
+    message += `\n\n📄 CV Link: ${candidate.cvUrl}`;
+  }
+  
+  message += `\n\nBest regards,\nZOD Manpower User`;
+  
+  Linking.openURL(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`);
 };
 
 // ------------------- COMPONENTS -------------------
@@ -214,6 +657,7 @@ const CategoryIcon = ({ icon, label, color, onPress, isActive }) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const handlePressIn = () => Animated.spring(scaleAnim, { toValue: 0.92, useNativeDriver: true }).start();
   const handlePressOut = () => Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true }).start();
+  
   return (
     <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
       <TouchableOpacity onPress={onPress} onPressIn={handlePressIn} onPressOut={handlePressOut} activeOpacity={0.9}>
@@ -226,21 +670,23 @@ const CategoryIcon = ({ icon, label, color, onPress, isActive }) => {
   );
 };
 
-const CandidateCard = ({ item, onPress, isDarkMode, t, index }) => {
+const CandidateCard = ({ item, onPress, isDarkMode, t, index, onDownloadCV, onDownloadProfile, onHire }) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const translateYAnim = useRef(new Animated.Value(30)).current;
   
   useEffect(() => {
-    Animated.delay(index * 50).start(() => {
-      Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
-    });
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 400, delay: index * 60, useNativeDriver: true }),
+      Animated.spring(translateYAnim, { toValue: 0, delay: index * 60, friction: 8, tension: 40, useNativeDriver: true })
+    ]).start();
   }, []);
 
-  const handlePressIn = () => Animated.spring(scaleAnim, { toValue: 0.96, useNativeDriver: true }).start();
-  const handlePressOut = () => Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true }).start();
+  const handlePressIn = () => Animated.spring(scaleAnim, { toValue: 0.96, friction: 5, tension: 300, useNativeDriver: true }).start();
+  const handlePressOut = () => Animated.spring(scaleAnim, { toValue: 1, friction: 5, tension: 300, useNativeDriver: true }).start();
 
   return (
-    <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: scaleAnim }], width: '48%', marginBottom: 16 }}>
+    <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: scaleAnim }, { translateY: translateYAnim }], width: '48%', marginBottom: 16 }}>
       <TouchableOpacity onPress={onPress} onPressIn={handlePressIn} onPressOut={handlePressOut} activeOpacity={0.9}>
         <LinearGradient colors={isDarkMode ? ['#1e1e2e', '#2a2a3e'] : ['#ffffff', '#f8f9fa']} style={styles.card}>
           <View style={styles.cardImageWrapper}>
@@ -269,6 +715,21 @@ const CandidateCard = ({ item, onPress, isDarkMode, t, index }) => {
               </View>
               <Text style={[styles.cardSalary, isDarkMode && styles.darkText]}>{item.salary}</Text>
             </View>
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity style={styles.hireButtonCard} onPress={() => onHire(item)}>
+                <LinearGradient colors={['#25D366', '#128C7E']} style={styles.hireButtonGradient}>
+                  <Text style={styles.hireButtonText}>💬 {t.hire}</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.downloadButtonsRow}>
+              <TouchableOpacity style={styles.downloadCvBtn} onPress={() => onDownloadCV(item)}>
+                <Text style={styles.downloadCvBtnText}>📄 {t.download_cv}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.downloadProfileBtn} onPress={() => onDownloadProfile(item)}>
+                <Text style={styles.downloadProfileBtnText}>👤 {t.download_profile}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </LinearGradient>
       </TouchableOpacity>
@@ -279,12 +740,12 @@ const CandidateCard = ({ item, onPress, isDarkMode, t, index }) => {
 // ------------------- SPLASH SCREEN -------------------
 function SplashScreen({ onFinish }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.7)).current;
+  const scaleAnim = useRef(new Animated.Value(0.8)).current;
 
   useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
-      Animated.spring(scaleAnim, { toValue: 1, tension: 10, useNativeDriver: true }),
+      Animated.spring(scaleAnim, { toValue: 1, friction: 5, tension: 40, useNativeDriver: true }),
     ]).start();
     setTimeout(onFinish, 2000);
   }, []);
@@ -305,15 +766,19 @@ function SplashScreen({ onFinish }) {
 // ------------------- LANGUAGE SCREEN -------------------
 function LanguageScreen({ onSelect }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(50)).current;
 
   useEffect(() => {
-    Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true }).start();
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+      Animated.spring(slideAnim, { toValue: 0, friction: 7, tension: 40, useNativeDriver: true })
+    ]).start();
   }, []);
 
   return (
     <LinearGradient colors={['#f5f7fa', '#ffffff']} style={styles.container}>
       <StatusBar style="dark" />
-      <Animated.View style={[styles.languageContainer, { opacity: fadeAnim }]}>
+      <Animated.View style={[styles.languageContainer, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
         <View style={styles.logoWrapper}>
           <LinearGradient colors={['#002F66', '#004A99']} style={styles.logoGradient}>
             <Image source={{ uri: LOGO_URL }} style={styles.logo} />
@@ -342,9 +807,14 @@ function LanguageScreen({ onSelect }) {
 }
 
 // ------------------- SETTINGS SCREEN -------------------
-function SettingsScreen({ lang, onBack, onLangChange, isDarkMode, onToggleDarkMode }) {
+function SettingsScreen({ lang, onBack, onLangChange, isDarkMode, onToggleDarkMode, offlineMode, onToggleOfflineMode, onOpenSavedProfiles }) {
   const t = translations[lang];
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
+  }, []);
 
   const handleShare = async () => {
     await Share.share({ message: 'Check out ZOD Manpower App! https://zodmanpower.info' });
@@ -354,25 +824,21 @@ function SettingsScreen({ lang, onBack, onLangChange, isDarkMode, onToggleDarkMo
     Linking.openURL('https://play.google.com/store/apps/details?id=com.zod.manpower');
   };
 
-  const handleClearCache = () => {
-    Alert.alert('Success', t.cache_cleared);
+  const handleClearCache = async () => {
+    try {
+      await AsyncStorage.removeItem(CACHE_KEYS.CANDIDATES);
+      await AsyncStorage.removeItem(CACHE_KEYS.LAST_UPDATE);
+      Alert.alert('Success', t.cache_cleared);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to clear cache');
+    }
   };
 
   const SettingSection = ({ title, children }) => (
-    <View style={[styles.settingsCard, isDarkMode && styles.darkCard]}>
+    <Animated.View style={[styles.settingsCard, isDarkMode && styles.darkCard, { opacity: fadeAnim }]}>
       <Text style={[styles.settingsSectionTitle, isDarkMode && styles.darkText]}>{title}</Text>
       {children}
-    </View>
-  );
-
-  const SettingItem = ({ icon, label, onPress, isLink = true }) => (
-    <TouchableOpacity style={styles.settingItem} onPress={onPress} activeOpacity={0.7}>
-      <View style={styles.settingItemLeft}>
-        <Text style={styles.settingItemIcon}>{icon}</Text>
-        <Text style={[styles.settingItemLabel, isDarkMode && styles.darkText]}>{label}</Text>
-      </View>
-      {isLink && <Text style={styles.settingItemArrow}>→</Text>}
-    </TouchableOpacity>
+    </Animated.View>
   );
 
   const SwitchItem = ({ icon, label, value, onValueChange }) => (
@@ -402,6 +868,23 @@ function SettingsScreen({ lang, onBack, onLangChange, isDarkMode, onToggleDarkMo
           <SwitchItem icon="🌙" label={t.dark_mode} value={isDarkMode} onValueChange={onToggleDarkMode} />
         </SettingSection>
 
+        <SettingSection title="📱 Offline Mode">
+          <SwitchItem icon="📶" label={t.enable_offline} value={offlineMode} onValueChange={onToggleOfflineMode} />
+          <Text style={[styles.offlineNote, isDarkMode && styles.darkText]}>
+            {offlineMode ? t.offline_available : t.online_required}
+          </Text>
+        </SettingSection>
+
+        <SettingSection title="💾 Saved Data">
+          <TouchableOpacity style={styles.settingItem} onPress={onOpenSavedProfiles}>
+            <View style={styles.settingItemLeft}>
+              <Text style={styles.settingItemIcon}>📁</Text>
+              <Text style={[styles.settingItemLabel, isDarkMode && styles.darkText]}>{t.view_saved_profiles}</Text>
+            </View>
+            <Text style={styles.settingItemArrow}>→</Text>
+          </TouchableOpacity>
+        </SettingSection>
+
         <SettingSection title="🌐 Language">
           <View style={styles.languageSelector}>
             <TouchableOpacity style={[styles.langSelectorBtn, lang === 'en' && styles.activeLangSelector]} onPress={() => onLangChange('en')}>
@@ -417,45 +900,52 @@ function SettingsScreen({ lang, onBack, onLangChange, isDarkMode, onToggleDarkMo
           <SwitchItem icon="🔔" label={t.push_notifications} value={notificationsEnabled} onValueChange={setNotificationsEnabled} />
         </SettingSection>
 
-        <SettingSection title="🔒 Privacy & Security">
-          <SettingItem icon="📄" label={t.privacy_policy} onPress={() => Linking.openURL('https://zodmanpower.info/privacy')} />
-          <SettingItem icon="⚖️" label={t.terms_conditions} onPress={() => Linking.openURL('https://zodmanpower.info/terms')} />
-        </SettingSection>
-
         <SettingSection title="💙 Support">
-          <SettingItem icon="📤" label={t.share} onPress={handleShare} />
-          <SettingItem icon="⭐" label={t.rate} onPress={handleRate} />
-          <SettingItem icon="🗑️" label={t.clear_cache} onPress={handleClearCache} />
+          <TouchableOpacity style={styles.settingItem} onPress={handleShare}>
+            <View style={styles.settingItemLeft}><Text style={styles.settingItemIcon}>📤</Text><Text style={[styles.settingItemLabel, isDarkMode && styles.darkText]}>{t.share}</Text></View>
+            <Text style={styles.settingItemArrow}>→</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.settingItem} onPress={handleRate}>
+            <View style={styles.settingItemLeft}><Text style={styles.settingItemIcon}>⭐</Text><Text style={[styles.settingItemLabel, isDarkMode && styles.darkText]}>{t.rate}</Text></View>
+            <Text style={styles.settingItemArrow}>→</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.settingItem} onPress={handleClearCache}>
+            <View style={styles.settingItemLeft}><Text style={styles.settingItemIcon}>🗑️</Text><Text style={[styles.settingItemLabel, isDarkMode && styles.darkText]}>{t.clear_cache}</Text></View>
+            <Text style={styles.settingItemArrow}>→</Text>
+          </TouchableOpacity>
         </SettingSection>
 
         <SettingSection title="📞 Contact Us">
-          <SettingItem icon="🌐" label={t.website} onPress={() => Linking.openURL('https://zodmanpower.info')} />
-          <SettingItem icon="📞" label={t.call} onPress={() => Linking.openURL('tel:+97455355206')} />
-          <SettingItem icon="✉️" label={t.email} onPress={() => Linking.openURL('mailto:info@zodmanpower.info')} />
-        </SettingSection>
-
-        <SettingSection title="📱 Social Media">
-          <SettingItem icon="📘" label={t.facebook} onPress={() => Linking.openURL('https://facebook.com/zodmanpower')} />
-          <SettingItem icon="📷" label={t.instagram} onPress={() => Linking.openURL('https://instagram.com/zodmanpower')} />
-          <SettingItem icon="🐦" label={t.twitter} onPress={() => Linking.openURL('https://twitter.com/zodmanpower')} />
-        </SettingSection>
-
-        <SettingSection title="❓ Help & Support">
-          <SettingItem icon="❓" label={t.faq} onPress={() => Alert.alert('FAQ', 'Coming soon!')} />
-          <SettingItem icon="💬" label={t.contact_support} onPress={() => Linking.openURL('mailto:support@zodmanpower.info')} />
+          <TouchableOpacity style={styles.settingItem} onPress={() => Linking.openURL('https://zodmanpower.info')}>
+            <View style={styles.settingItemLeft}><Text style={styles.settingItemIcon}>🌐</Text><Text style={[styles.settingItemLabel, isDarkMode && styles.darkText]}>{t.website}</Text></View>
+            <Text style={styles.settingItemArrow}>→</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.settingItem} onPress={() => Linking.openURL('tel:+97455355206')}>
+            <View style={styles.settingItemLeft}><Text style={styles.settingItemIcon}>📞</Text><Text style={[styles.settingItemLabel, isDarkMode && styles.darkText]}>{t.call}</Text></View>
+            <Text style={styles.settingItemArrow}>→</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.settingItem} onPress={() => Linking.openURL('mailto:info@zodmanpower.info')}>
+            <View style={styles.settingItemLeft}><Text style={styles.settingItemIcon}>✉️</Text><Text style={[styles.settingItemLabel, isDarkMode && styles.darkText]}>{t.email}</Text></View>
+            <Text style={styles.settingItemArrow}>→</Text>
+          </TouchableOpacity>
         </SettingSection>
 
         <SettingSection title="ℹ️ About">
-          <SettingItem icon="👨‍💻" label={t.developers} onPress={() => Alert.alert(t.developers, `${t.developer_name}\n${t.developer_email}`)} isLink={false} />
-          <SettingItem icon="📅" label={`${t.version} ${APP_VERSION}`} onPress={() => {}} isLink={false} />
+          <TouchableOpacity style={styles.settingItem} onPress={() => Alert.alert(t.developers, `${t.developer_name}\n${t.developer_email}`)}>
+            <View style={styles.settingItemLeft}><Text style={styles.settingItemIcon}>👨‍💻</Text><Text style={[styles.settingItemLabel, isDarkMode && styles.darkText]}>{t.developers}</Text></View>
+            <Text style={styles.settingItemArrow}>→</Text>
+          </TouchableOpacity>
+          <View style={styles.settingItem}>
+            <View style={styles.settingItemLeft}><Text style={styles.settingItemIcon}>📅</Text><Text style={[styles.settingItemLabel, isDarkMode && styles.darkText]}>{t.version} {APP_VERSION}</Text></View>
+          </View>
         </SettingSection>
       </ScrollView>
     </View>
   );
 }
 
-// ------------------- MAIN SCREEN WITH FIXED HEADER -------------------
-function MainScreen({ lang, onOpenSettings, isDarkMode }) {
+// ------------------- MAIN SCREEN -------------------
+function MainScreen({ lang, onOpenSettings, isDarkMode, offlineMode, onOpenSavedProfiles }) {
   const t = translations[lang];
   const [cvs, setCvs] = useState([]);
   const [filteredCvs, setFilteredCvs] = useState([]);
@@ -466,34 +956,8 @@ function MainScreen({ lang, onOpenSettings, isDarkMode }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdate, setLastUpdate] = useState('');
-  
+  const [refreshKey, setRefreshKey] = useState(0);
   const scrollY = useRef(new Animated.Value(0)).current;
-  const headerFadeAnim = useRef(new Animated.Value(1)).current;
-
-  // Header animation values
-  const headerHeight = scrollY.interpolate({
-    inputRange: [0, 80],
-    outputRange: [110, 70],
-    extrapolate: 'clamp',
-  });
-
-  const headerOpacity = scrollY.interpolate({
-    inputRange: [0, 50, 100],
-    outputRange: [1, 0.95, 0.9],
-    extrapolate: 'clamp',
-  });
-
-  const logoScale = scrollY.interpolate({
-    inputRange: [0, 80],
-    outputRange: [1, 0.8],
-    extrapolate: 'clamp',
-  });
-
-  const titleOpacity = scrollY.interpolate({
-    inputRange: [0, 60, 80],
-    outputRange: [1, 0.5, 0],
-    extrapolate: 'clamp',
-  });
 
   const categories = [
     { key: 'all', label: t.all, icon: '🌟', color: '#6366f1' },
@@ -519,12 +983,18 @@ function MainScreen({ lang, onOpenSettings, isDarkMode }) {
 
   const loadCVs = async () => {
     try {
-      const talents = await fetchTalents();
+      const talents = await fetchTalents(offlineMode);
       if (talents.length > 0) {
         setCvs(talents);
         setFilteredCvs(talents);
-        const now = new Date();
-        setLastUpdate(`${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`);
+        const lastUpdateTime = await AsyncStorage.getItem(CACHE_KEYS.LAST_UPDATE);
+        if (lastUpdateTime) {
+          const date = new Date(lastUpdateTime);
+          setLastUpdate(`${date.getHours().toString().padStart(2,'0')}:${date.getMinutes().toString().padStart(2,'0')}`);
+        } else {
+          const now = new Date();
+          setLastUpdate(`${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`);
+        }
       }
     } catch (error) {
       Alert.alert('Error', t.error);
@@ -534,7 +1004,33 @@ function MainScreen({ lang, onOpenSettings, isDarkMode }) {
     }
   };
 
-  useEffect(() => { loadCVs(); }, []);
+  useEffect(() => { loadCVs(); }, [offlineMode, refreshKey]);
+
+  const onRefresh = () => {
+    if (!offlineMode) {
+      setRefreshing(true);
+      loadCVs();
+    } else {
+      Alert.alert('Offline Mode', 'Please disable offline mode to refresh data');
+      setRefreshing(false);
+    }
+  };
+
+  const handleProfileSaved = () => {
+    setRefreshKey(prev => prev + 1);
+  };
+
+  const onHire = (candidate) => {
+    handleHire(candidate, t);
+  };
+
+  const onDownloadCV = (candidate) => {
+    downloadCV(candidate, t);
+  };
+
+  const onDownloadProfile = (candidate) => {
+    downloadProfile(candidate, t, handleProfileSaved);
+  };
 
   useEffect(() => {
     let filtered = [...cvs];
@@ -549,22 +1045,31 @@ function MainScreen({ lang, onOpenSettings, isDarkMode }) {
     setFilteredCvs(filtered);
   }, [filter, countryFilter, cvs, searchQuery]);
 
-  const stats = {
-    total: cvs.length,
-  };
+  const stats = { total: cvs.length };
 
-  const openCV = async (url) => {
-    if (url && url !== 'N/A' && url !== '#') {
-      await WebBrowser.openBrowserAsync(url);
-    } else {
-      Alert.alert('Info', 'CV link not available');
-    }
-  };
+  const headerHeight = scrollY.interpolate({
+    inputRange: [0, 80],
+    outputRange: [110, 70],
+    extrapolate: 'clamp',
+  });
 
-  const openWhatsApp = (candidateName) => {
-    const message = encodeURIComponent(`Hi! I'm interested in hiring ${candidateName} from ZOD Manpower.`);
-    Linking.openURL(`https://wa.me/97455355206?text=${message}`);
-  };
+  const headerOpacity = scrollY.interpolate({
+    inputRange: [0, 50, 100],
+    outputRange: [1, 0.96, 0.92],
+    extrapolate: 'clamp',
+  });
+
+  const logoScale = scrollY.interpolate({
+    inputRange: [0, 80],
+    outputRange: [1, 0.85],
+    extrapolate: 'clamp',
+  });
+
+  const titleOpacity = scrollY.interpolate({
+    inputRange: [0, 60, 80],
+    outputRange: [1, 0.6, 0],
+    extrapolate: 'clamp',
+  });
 
   if (loading) {
     return (
@@ -614,10 +1119,19 @@ function MainScreen({ lang, onOpenSettings, isDarkMode }) {
             <TouchableOpacity style={styles.viewCVBtn} onPress={() => openCV(selected.cvUrl)}>
               <Text style={styles.viewCVText}>📄 {t.view_cv}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.hireBtn} onPress={() => openWhatsApp(selected.name)}>
-              <LinearGradient colors={['#25D366', '#128C7E']} style={styles.hireBtnGradient}>
-                <Text style={styles.hireText}>💬 {t.hire}</Text>
+            <TouchableOpacity style={styles.detailHireBtn} onPress={() => onHire(selected)}>
+              <LinearGradient colors={['#25D366', '#128C7E']} style={styles.hireBtnGradientDetail}>
+                <Text style={styles.hireBtnTextDetail}>💬 {t.hire}</Text>
               </LinearGradient>
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.detailDownloadRow}>
+            <TouchableOpacity style={styles.detailCvBtn} onPress={() => onDownloadCV(selected)}>
+              <Text style={styles.detailDownloadText}>📄 {t.download_cv}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.detailProfileBtn} onPress={() => onDownloadProfile(selected)}>
+              <Text style={styles.detailDownloadText}>👤 {t.download_profile}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -629,14 +1143,10 @@ function MainScreen({ lang, onOpenSettings, isDarkMode }) {
     <View style={[styles.container, isDarkMode && styles.darkContainer]}>
       <StatusBar style={isDarkMode ? 'light' : 'dark'} />
       
-      {/* Animated Header */}
       <Animated.View style={[styles.headerContainer, { height: headerHeight, opacity: headerOpacity }]}>
         <LinearGradient colors={['#002F66', '#004A99']} style={styles.headerGradient}>
           <View style={styles.headerContent}>
-            <Animated.Image 
-              source={{ uri: LOGO_URL }} 
-              style={[styles.headerLogo, { transform: [{ scale: logoScale }] }]} 
-            />
+            <Animated.Image source={{ uri: LOGO_URL }} style={[styles.headerLogo, { transform: [{ scale: logoScale }] }]} />
             <Animated.View style={[styles.headerTextContainer, { opacity: titleOpacity }]}>
               <Text style={styles.headerTitle}>ZOD MANPOWER</Text>
               <Text style={styles.headerSubtitle}>{t.tagline}</Text>
@@ -648,14 +1158,12 @@ function MainScreen({ lang, onOpenSettings, isDarkMode }) {
         </LinearGradient>
       </Animated.View>
 
-      {/* Scrollable Content */}
       <Animated.ScrollView 
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
         style={styles.scrollView}
       >
-        {/* Stats Card - Total Candidates Only */}
         <View style={styles.statsGrid}>
           <LinearGradient colors={['#002F66', '#004A99']} style={styles.statCard}>
             <Text style={styles.statCardIcon}>👥</Text>
@@ -664,7 +1172,6 @@ function MainScreen({ lang, onOpenSettings, isDarkMode }) {
           </LinearGradient>
         </View>
 
-        {/* Search */}
         <View style={styles.searchWrapper}>
           <LinearGradient colors={isDarkMode ? ['#1e1e2e', '#2a2a3e'] : ['#ffffff', '#f8f9fa']} style={styles.searchContainer}>
             <Text style={styles.searchIcon}>🔍</Text>
@@ -683,7 +1190,6 @@ function MainScreen({ lang, onOpenSettings, isDarkMode }) {
           </LinearGradient>
         </View>
 
-        {/* Categories */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoriesScroll} contentContainerStyle={styles.categoriesScrollContent}>
           {categories.map(cat => (
             <CategoryIcon 
@@ -697,7 +1203,6 @@ function MainScreen({ lang, onOpenSettings, isDarkMode }) {
           ))}
         </ScrollView>
 
-        {/* Countries */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.countriesScroll} contentContainerStyle={styles.countriesScrollContent}>
           {countries.map(c => (
             <TouchableOpacity key={c.key} onPress={() => setCountryFilter(c.key)} style={[styles.countryChip, countryFilter === c.key && styles.activeCountryChip]}>
@@ -707,10 +1212,8 @@ function MainScreen({ lang, onOpenSettings, isDarkMode }) {
           ))}
         </ScrollView>
 
-        {/* Last Update */}
         <Text style={[styles.lastUpdate, isDarkMode && styles.darkText]}>🕐 {t.last_update}: {lastUpdate}</Text>
 
-        {/* Candidates Grid */}
         <View style={styles.gridContainer}>
           {filteredCvs.length === 0 ? (
             <View style={styles.emptyContainer}>
@@ -720,7 +1223,17 @@ function MainScreen({ lang, onOpenSettings, isDarkMode }) {
           ) : (
             <View style={styles.gridRow}>
               {filteredCvs.map((item, index) => (
-                <CandidateCard key={item.id} item={item} index={index} onPress={() => setSelected(item)} isDarkMode={isDarkMode} t={t} />
+                <CandidateCard 
+                  key={item.id} 
+                  item={item} 
+                  index={index} 
+                  onPress={() => setSelected(item)} 
+                  isDarkMode={isDarkMode} 
+                  t={t}
+                  onDownloadCV={onDownloadCV}
+                  onDownloadProfile={onDownloadProfile}
+                  onHire={onHire}
+                />
               ))}
             </View>
           )}
@@ -729,7 +1242,7 @@ function MainScreen({ lang, onOpenSettings, isDarkMode }) {
         <View style={{ height: 30 }} />
       </Animated.ScrollView>
 
-      <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadCVs(); }} colors={['#002F66']} />
+      <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#002F66']} />
     </View>
   );
 }
@@ -740,26 +1253,53 @@ export default function App() {
   const [screen, setScreen] = useState('language');
   const [lang, setLang] = useState('en');
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [offlineMode, setOfflineMode] = useState(false);
+  const [showSavedProfiles, setShowSavedProfiles] = useState(false);
+
+  useEffect(() => {
+    const loadOfflineMode = async () => {
+      const saved = await AsyncStorage.getItem(CACHE_KEYS.OFFLINE_MODE);
+      if (saved !== null) setOfflineMode(saved === 'true');
+    };
+    loadOfflineMode();
+  }, []);
+
+  const toggleOfflineMode = async (value) => {
+    setOfflineMode(value);
+    await AsyncStorage.setItem(CACHE_KEYS.OFFLINE_MODE, value.toString());
+  };
 
   if (showSplash) return <SplashScreen onFinish={() => setShowSplash(false)} />;
   if (screen === 'language') return <LanguageScreen onSelect={(l) => { setLang(l); setScreen('main'); }} />;
-  if (screen === 'settings') return <SettingsScreen lang={lang} onBack={() => setScreen('main')} onLangChange={(l) => { setLang(l); setScreen('main'); }} isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)} />;
-  return <MainScreen lang={lang} onOpenSettings={() => setScreen('settings')} isDarkMode={isDarkMode} />;
+  if (screen === 'settings') return (
+    <SettingsScreen 
+      lang={lang} 
+      onBack={() => setScreen('main')} 
+      onLangChange={(l) => { setLang(l); setScreen('main'); }} 
+      isDarkMode={isDarkMode} 
+      onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+      offlineMode={offlineMode}
+      onToggleOfflineMode={toggleOfflineMode}
+      onOpenSavedProfiles={() => setShowSavedProfiles(true)}
+    />
+  );
+  return (
+    <>
+      <MainScreen lang={lang} onOpenSettings={() => setScreen('settings')} isDarkMode={isDarkMode} offlineMode={offlineMode} onOpenSavedProfiles={() => setShowSavedProfiles(true)} />
+      <SavedProfilesModal visible={showSavedProfiles} onClose={() => setShowSavedProfiles(false)} isDarkMode={isDarkMode} t={translations[lang]} />
+    </>
+  );
 }
 
 // ------------------- STYLES -------------------
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f7fa' },
   darkContainer: { backgroundColor: '#121212' },
-
-  // Splash
   splashContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   splashLogoWrapper: { width: 140, height: 140, borderRadius: 70, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 8 },
   splashLogo: { width: 110, height: 110, borderRadius: 55 },
   splashTitle: { fontSize: 28, fontWeight: 'bold', color: '#fff', marginBottom: 5 },
   splashSubtitle: { fontSize: 14, color: '#fff', opacity: 0.8 },
-
-  // Language
   languageContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
   logoWrapper: { marginBottom: 20 },
   logoGradient: { width: 130, height: 130, borderRadius: 65, alignItems: 'center', justifyContent: 'center' },
@@ -771,8 +1311,6 @@ const styles = StyleSheet.create({
   langBtnGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 15, gap: 10 },
   langBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   langFlag: { fontSize: 20 },
-
-  // Header (Fixed + Animated)
   headerContainer: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100, overflow: 'hidden' },
   headerGradient: { flex: 1, borderBottomLeftRadius: 25, borderBottomRightRadius: 25 },
   headerContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, flex: 1 },
@@ -782,24 +1320,17 @@ const styles = StyleSheet.create({
   headerSubtitle: { color: '#fff', fontSize: 10, opacity: 0.8 },
   headerSettingsBtn: { padding: 8 },
   headerSettingsIcon: { fontSize: 22, color: '#fff' },
-
   scrollView: { flex: 1, marginTop: 110 },
-
-  // Stats - Single card full width
   statsGrid: { flexDirection: 'row', paddingHorizontal: 15, marginTop: 15 },
   statCard: { flex: 1, borderRadius: 16, padding: 12, alignItems: 'center', elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4 },
   statCardIcon: { fontSize: 24, color: '#fff', marginBottom: 4 },
   statCardNumber: { fontSize: 28, fontWeight: 'bold', color: '#fff' },
   statCardLabel: { fontSize: 10, color: '#fff', opacity: 0.8, marginTop: 2 },
-
-  // Search
   searchWrapper: { paddingHorizontal: 15, marginTop: 15 },
   searchContainer: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 12, borderRadius: 30, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4 },
   searchIcon: { fontSize: 16, marginRight: 10, color: '#999' },
   searchInput: { flex: 1, fontSize: 14 },
   searchClear: { fontSize: 16, color: '#999', padding: 5 },
-
-  // Categories
   categoriesScroll: { marginTop: 15 },
   categoriesScrollContent: { paddingHorizontal: 15, gap: 12 },
   categoryIconBtn: { alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 25, borderWidth: 1, borderColor: '#e0e0e0' },
@@ -807,8 +1338,6 @@ const styles = StyleSheet.create({
   categoryIconEmoji: { fontSize: 18, marginBottom: 4 },
   categoryIconLabel: { fontSize: 11, color: '#666', fontWeight: '500' },
   categoryIconLabelActive: { color: '#fff' },
-
-  // Countries
   countriesScroll: { marginTop: 12 },
   countriesScrollContent: { paddingHorizontal: 15, gap: 8 },
   countryChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, gap: 5 },
@@ -816,14 +1345,9 @@ const styles = StyleSheet.create({
   countryFlag: { fontSize: 12 },
   countryName: { fontSize: 11, color: '#666' },
   activeCountryName: { color: '#fff' },
-
   lastUpdate: { textAlign: 'center', fontSize: 9, color: '#999', marginVertical: 12 },
-
-  // Grid
   gridContainer: { paddingHorizontal: 10 },
   gridRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-
-  // Card
   card: { borderRadius: 20, overflow: 'hidden', elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 4 },
   cardImageWrapper: { position: 'relative' },
   cardImage: { width: '100%', height: 140 },
@@ -836,12 +1360,19 @@ const styles = StyleSheet.create({
   cardContent: { padding: 12 },
   cardName: { fontSize: 14, fontWeight: 'bold', marginBottom: 4 },
   cardCategory: { fontSize: 11, color: '#002F66', fontWeight: '500', marginBottom: 6 },
-  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   cardCountry: { backgroundColor: '#eef2ff', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 },
   cardCountryText: { fontSize: 9, color: '#002F66', fontWeight: '500' },
   cardSalary: { fontSize: 11, color: '#002F66', fontWeight: 'bold' },
-
-  // Settings
+  buttonContainer: { marginBottom: 8 },
+  hireButtonCard: { borderRadius: 25, overflow: 'hidden', marginTop: 4 },
+  hireButtonGradient: { paddingVertical: 8, alignItems: 'center', borderRadius: 25 },
+  hireButtonText: { fontSize: 12, fontWeight: 'bold', color: '#fff' },
+  downloadButtonsRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
+  downloadCvBtn: { flex: 1, backgroundColor: '#002F66', paddingVertical: 6, borderRadius: 15, alignItems: 'center' },
+  downloadCvBtnText: { fontSize: 10, color: '#fff', fontWeight: '500' },
+  downloadProfileBtn: { flex: 1, backgroundColor: '#10b981', paddingVertical: 6, borderRadius: 15, alignItems: 'center' },
+  downloadProfileBtnText: { fontSize: 10, color: '#fff', fontWeight: '500' },
   settingsHeader: { paddingTop: 50, paddingBottom: 30, alignItems: 'center', borderBottomLeftRadius: 30, borderBottomRightRadius: 30 },
   settingsBackBtn: { position: 'absolute', top: 50, left: 20, zIndex: 1 },
   settingsBackText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
@@ -857,15 +1388,12 @@ const styles = StyleSheet.create({
   settingItemIcon: { fontSize: 18 },
   settingItemLabel: { fontSize: 15, color: '#333' },
   settingItemArrow: { fontSize: 16, color: '#ccc' },
-  
-  // Language Selector
+  offlineNote: { fontSize: 11, color: '#666', marginTop: 8, textAlign: 'center' },
   languageSelector: { flexDirection: 'row', gap: 12, marginTop: 5 },
   langSelectorBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 12, backgroundColor: '#f0f0f0' },
   activeLangSelector: { backgroundColor: '#002F66' },
   langSelectorText: { fontSize: 14, color: '#666' },
   activeLangSelectorText: { color: '#fff' },
-
-  // Detail
   detailHeader: { paddingTop: 50, paddingBottom: 20, paddingHorizontal: 20, borderBottomLeftRadius: 30, borderBottomRightRadius: 30 },
   detailBackBtn: { alignSelf: 'flex-start' },
   detailBackText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
@@ -883,17 +1411,54 @@ const styles = StyleSheet.create({
   buttonRow: { flexDirection: 'row', gap: 12, marginTop: 20 },
   viewCVBtn: { flex: 1, backgroundColor: '#e0e0e0', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
   viewCVText: { fontWeight: 'bold', color: '#333' },
-  hireBtn: { flex: 1, borderRadius: 12, overflow: 'hidden' },
-  hireBtnGradient: { paddingVertical: 14, alignItems: 'center' },
-  hireText: { fontWeight: 'bold', color: '#fff' },
-
-  // Loading & Empty
+  detailHireBtn: { flex: 1, borderRadius: 12, overflow: 'hidden' },
+  hireBtnGradientDetail: { paddingVertical: 14, alignItems: 'center' },
+  hireBtnTextDetail: { fontWeight: 'bold', color: '#fff', fontSize: 14 },
+  detailDownloadRow: { flexDirection: 'row', gap: 12, marginTop: 15 },
+  detailCvBtn: { flex: 1, backgroundColor: '#002F66', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
+  detailProfileBtn: { flex: 1, backgroundColor: '#10b981', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
+  detailDownloadText: { fontWeight: 'bold', color: '#fff', fontSize: 13 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { marginTop: 10, color: '#666' },
   emptyContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },
   emptyIcon: { fontSize: 50, marginBottom: 10 },
   emptyText: { fontSize: 16, color: '#999' },
-
   darkTitle: { color: '#fff' },
   darkText: { color: '#ccc' },
+  modalContainer: { flex: 1, backgroundColor: '#f5f7fa' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 50, paddingBottom: 15, paddingHorizontal: 20, borderBottomLeftRadius: 25, borderBottomRightRadius: 25 },
+  modalHeaderTitle: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
+  modalCloseBtn: { padding: 8 },
+  modalCloseText: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
+  emptySavedContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
+  emptySavedIcon: { fontSize: 60, marginBottom: 20, opacity: 0.5 },
+  emptySavedText: { fontSize: 18, fontWeight: 'bold', color: '#666', textAlign: 'center', marginBottom: 8 },
+  emptySavedSubText: { fontSize: 14, color: '#999', textAlign: 'center' },
+  savedProfilesList: { padding: 15 },
+  savedProfileItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 16, padding: 12, marginBottom: 12, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2 },
+  savedProfileImage: { width: 50, height: 50, borderRadius: 25 },
+  savedProfileImagePlaceholder: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#e0e0e0', alignItems: 'center', justifyContent: 'center' },
+  savedProfileImagePlaceholderText: { fontSize: 24 },
+  savedProfileInfo: { flex: 1, marginLeft: 12 },
+  savedProfileName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+  savedProfileCategory: { fontSize: 12, color: '#666', marginTop: 2 },
+  savedProfileDate: { fontSize: 10, color: '#999', marginTop: 2 },
+  savedProfileDelete: { padding: 8 },
+  savedProfileDeleteText: { fontSize: 18 },
+  profileViewer: { flex: 1 },
+  profileViewerBack: { padding: 15, paddingTop: 50 },
+  profileViewerBackText: { fontSize: 16, fontWeight: 'bold', color: '#002F66' },
+  profileViewerHeader: { alignItems: 'center', padding: 20 },
+  profileViewerImage: { width: 100, height: 100, borderRadius: 50, marginBottom: 12 },
+  profileViewerImagePlaceholder: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#e0e0e0', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  profileViewerImagePlaceholderText: { fontSize: 40 },
+  profileViewerName: { fontSize: 22, fontWeight: 'bold', color: '#333', marginBottom: 4 },
+  profileViewerCategory: { fontSize: 14, color: '#002F66', marginBottom: 8 },
+  profileViewerContent: { backgroundColor: '#fff', margin: 15, borderRadius: 20, padding: 20, elevation: 2 },
+  profileViewerRow: { flexDirection: 'row', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  profileViewerLabel: { width: 100, fontSize: 14, fontWeight: '600', color: '#666' },
+  profileViewerValue: { flex: 1, fontSize: 14, color: '#333' },
+  profileViewerDivider: { height: 1, backgroundColor: '#e0e0e0', marginVertical: 12 },
+  profileViewerSavedDate: { fontSize: 11, color: '#999', textAlign: 'center', marginTop: 8 },
+  statusBadge: { color: '#10b981', fontWeight: 'bold' },
 });
